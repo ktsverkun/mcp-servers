@@ -1,0 +1,45 @@
+name: Sync YCLIENTS API Spec
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: "0 9 * * 1"
+  workflow_dispatch: # manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check for spec changes
+        id: check
+        run: python scripts/sync_spec.py --dry-run
+        continue-on-error: true
+
+      - name: Sync spec and regenerate tools
+        if: steps.check.outcome == 'failure'  # exit code 2 = changes detected
+        run: python scripts/sync_spec.py
+
+      - name: Create Pull Request
+        if: steps.check.outcome == 'failure'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: sync YCLIENTS API spec"
+          title: "chore: update YCLIENTS API spec"
+          body: |
+            Automated update — the YCLIENTS API spec at developer.yclients.com has changed.
+
+            Changes were detected and tool modules have been regenerated.
+
+            Please review the diff and merge if everything looks correct.
+          branch: auto/sync-yclients-spec
+          delete-branch: true
