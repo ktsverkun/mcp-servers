@@ -22,7 +22,7 @@ class YClientsConfig:
         self.base_url: str = os.environ.get("YCLIENTS_BASE_URL", "https://api.yclients.com")
 
         if not self.partner_token:
-            raise RuntimeError(
-                "YCLIENTS_PARTNER_TOKEN environment variable is required. "
-                "Get your partner token from the YCLIENTS marketplace."
+            logging.getLogger(__name__).warning(
+                "YCLIENTS_PARTNER_TOKEN is not set. "
+                "API calls to YClients will fail without a valid partner token."
             )
