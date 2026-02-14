@@ -224,7 +224,22 @@ class BookingClient:
 
         The token is extracted once per domain and cached.
         """
-        if domain in self._partner_tokens or domain == "api.yclients.com":
+        if domain in self._partner_tokens:
+            return
+        if domain == "api.yclients.com":
+            # For API requests, reuse any available partner token
+            if self.partner_token:
+                self._partner_tokens[domain] = self.partner_token
+                return
+            # Try any already-extracted domain token
+            if self._partner_tokens:
+                self._partner_tokens[domain] = next(iter(self._partner_tokens.values()))
+                return
+            # Bootstrap: extract token from a known booking page
+            bootstrap_domain = "n864017.yclients.com"
+            await self._ensure_partner_token(bootstrap_domain, company_id=806724)
+            if bootstrap_domain in self._partner_tokens:
+                self._partner_tokens[domain] = self._partner_tokens[bootstrap_domain]
             return
         if self.partner_token:
             # Already have a globally-configured token — nothing to fetch.
