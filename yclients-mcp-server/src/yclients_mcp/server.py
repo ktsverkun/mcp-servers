@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from .client import BookingClient, YClientsClient
 from .config import YClientsConfig, setup_logging
@@ -25,6 +28,30 @@ config = YClientsConfig()
 client = YClientsClient(config)
 booking_client = BookingClient(config.partner_token)
 register_all_tools(mcp, client, booking_client)
+
+
+@mcp.custom_route("/", methods=["GET"])
+async def server_info(request: Request) -> JSONResponse:
+    """Discovery endpoint — returns server info with tools list (like Ozon)."""
+    tools = []
+    for tool in mcp._tool_manager._tools.values():
+        tools.append({
+            "name": tool.name,
+            "description": tool.description or "",
+        })
+    return JSONResponse({
+        "name": "YCLIENTS MCP Server",
+        "version": "2.14.5",
+        "description": (
+            "MCP Server for YCLIENTS CRM — booking, clients, staff, services, "
+            "finances, loyalty, inventory, analytics and more"
+        ),
+        "endpoints": {
+            "/mcp": "MCP Streamable HTTP endpoint (POST/GET/DELETE)",
+            "/health": "Health check",
+        },
+        "tools": tools,
+    })
 
 
 def main() -> None:
