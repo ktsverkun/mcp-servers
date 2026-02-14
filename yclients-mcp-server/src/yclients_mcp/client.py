@@ -437,12 +437,16 @@ class BookingClient:
         result = await self._request(
             "api.yclients.com", "GET", "/api/v1/companies/", params=params
         )
+        # API may return a list directly or {"success": ..., "data": [...]}
+        companies = result if isinstance(result, list) else (result.get("data") or [])
         # Enrich with booking domain derived from main_group_id
-        for company in result.get("data") or []:
+        for company in companies:
             group_id = company.get("main_group_id")
             if group_id:
                 company["booking_domain"] = f"n{group_id}.yclients.com"
                 company["booking_url"] = f"https://n{group_id}.yclients.com/company/{company['id']}"
+        if isinstance(result, list):
+            return {"success": True, "data": companies}
         return result
 
     async def get_company_booking_info(self, company_id: int) -> dict[str, Any]:
