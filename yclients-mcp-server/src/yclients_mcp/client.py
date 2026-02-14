@@ -520,15 +520,85 @@ class BookingClient:
         *,
         sort_by_nearest: bool = True,
         chain_id: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> dict[str, Any]:
-        """Return the authenticated user's booking history."""
+        """Return the authenticated user's booking history (compact format).
+
+        Optional date_from / date_to (YYYY-MM-DD) filter client-side.
+        Returns a flat list instead of raw JSON:API.
+        """
         if chain_id:
             q: dict[str, Any] = {"filter[chain_id]": chain_id}
         else:
             q = {"filter[location_ids][]": company_id}
         if sort_by_nearest:
             q["filter[sort_by_nearest_time]"] = "true"
-        return await self._request(domain, "GET", "/api/v1/booking/attendances", params=q)
+        raw = await self._request(domain, "GET", "/api/v1/booking/attendances", params=q)
+        return self._parse_attendances(raw, date_from=date_from, date_to=date_to)
+
+    @staticmethod
+    def _parse_attendances(
+        raw: dict[str, Any],
+        *,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict[str, Any]:
+        """Transform JSON:API attendances into a compact flat list."""
+        records = raw.get("data")
+        if not isinstance(records, list):
+            return raw  # pass through errors as-is
+
+        # Build lookup for included resources
+        inc_map: dict[tuple[str, Any], dict[str, Any]] = {}
+        for item in raw.get("included") or []:
+            inc_map[(item.get("type"), item.get("id"))] = item
+
+        result = []
+        for r in records:
+            attrs = r.get("attributes", {})
+            dt_str = attrs.get("datetime", "")
+            if not dt_str:
+                continue
+
+            # Date filtering
+            date_part = dt_str[:10]  # "YYYY-MM-DD"
+            if date_from and date_part < date_from:
+                continue
+            if date_to and date_part > date_to:
+                continue
+
+            # Extract related service/staff names
+            rels = r.get("relationships", {})
+            services = []
+            for s in rels.get("services", {}).get("data") or []:
+                svc = inc_map.get((s.get("type"), s.get("id")))
+                if svc:
+                    services.append(svc.get("attributes", {}).get("title", ""))
+
+            staff_name = ""
+            staff_data = rels.get("staff", {}).get("data")
+            if staff_data:
+                items = staff_data if isinstance(staff_data, list) else [staff_data]
+                for st in items:
+                    stf = inc_map.get((st.get("type"), st.get("id")))
+                    if stf:
+                        staff_name = stf.get("attributes", {}).get("name", "")
+
+            status_map = {0: "ожидает", 1: "подтверждён", 2: "пришёл", -1: "не пришёл"}
+            entry: dict[str, Any] = {
+                "id": r.get("id"),
+                "datetime": dt_str,
+                "services": services,
+                "staff": staff_name,
+                "status": status_map.get(attrs.get("attendance_status"), str(attrs.get("attendance_status"))),
+                "duration_min": (attrs.get("duration") or 0) // 60,
+                "is_deleted": attrs.get("is_deleted", False),
+                "can_cancel": attrs.get("is_delete_record_allowed", False),
+            }
+            result.append(entry)
+
+        return {"success": True, "total": len(result), "records": result}
 
     # ── Activity schedule ─────────────────────────────────────────────────
 

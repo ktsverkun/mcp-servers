@@ -67,9 +67,10 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
             params: domain, user_token (str)
 
           get_user_attendances
-            List the authenticated user's bookings (all history).
+            List the authenticated user's bookings (compact format).
             params: domain, company_id (int)
-            optional: chain_id (int) — use instead of company_id for chains
+            optional: chain_id (int) — use instead of company_id for chains,
+              date_from (str, "YYYY-MM-DD"), date_to (str, "YYYY-MM-DD") — filter by date range
 
           search_activities
             Find group classes on a specific date.
@@ -156,6 +157,8 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
             return await booking_client.get_user_attendances(
                 domain, int(company_id),
                 chain_id=int(chain_id) if chain_id else None,
+                date_from=p.get("date_from"),
+                date_to=p.get("date_to"),
             )
 
         # ── search_activities ─────────────────────────────────────────────
