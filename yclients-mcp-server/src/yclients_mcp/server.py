@@ -34,7 +34,7 @@ def main() -> None:
     port = int(os.environ.get("MCP_PORT", "8000"))
 
     if transport == "http":
-        mcp.run(transport="http", host=host, port=port)
+        mcp.run(transport="http", host=host, port=port, json_response=True)
     else:
         mcp.run()  # stdio — default for local Claude Desktop
 
