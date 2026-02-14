@@ -427,12 +427,15 @@ class BookingClient:
         query: str,
         *,
         city_id: int | None = None,
+        group_id: int | None = None,
         count: int = 10,
     ) -> dict[str, Any]:
         """Search YCLIENTS companies by name. Returns companies with booking domain info."""
-        params: dict[str, Any] = {"q": query, "count": count}
+        params: dict[str, Any] = {"title": query, "count": count}
         if city_id:
             params["city_id"] = city_id
+        if group_id:
+            params["group_id"] = group_id
 
         result = await self._request(
             "api.yclients.com", "GET", "/api/v1/companies/", params=params

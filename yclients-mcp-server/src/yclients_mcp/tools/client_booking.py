@@ -40,7 +40,7 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
             Find salons/gyms/studios by name across all of YCLIENTS.
             Returns company list with id, title, address, phone, and booking_domain.
             params: query (str) — name or keyword to search
-            optional: city_id (int), count (int, default 10)
+            optional: city_id (int), group_id (int) — filter by chain/network, count (int, default 10)
 
           get_company_booking_info
             Get full details for a specific company including its booking_domain.
@@ -94,6 +94,7 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
             return await booking_client.search_companies(
                 query,
                 city_id=int(p["city_id"]) if p.get("city_id") else None,
+                group_id=int(p["group_id"]) if p.get("group_id") else None,
                 count=int(p.get("count", 10)),
             )
 
