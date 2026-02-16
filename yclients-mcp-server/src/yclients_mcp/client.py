@@ -569,7 +569,7 @@ class BookingClient:
             domain, "POST", "/api/v1/user/auth",
             json={"phone": phone, "code": code, "company_id": company_id},
         )
-        user_token = (result.get("data") or {}).get("user_token")
+        user_token = result.get("user_token") or (result.get("data") or {}).get("user_token")
         if user_token:
             self._user_tokens[domain] = user_token
             log.info("BookingClient: user_token stored for domain %s", domain)
@@ -615,17 +615,26 @@ class BookingClient:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> dict[str, Any]:
-        """Transform JSON:API attendances into a compact flat list."""
+        """Transform JSON:API attendances into a compact flat list.
+
+        The API returns a JSON:API structure with nested relationships:
+          attendance -> relationships.records -> included record
+            -> relationships.attendance_service_items -> included service
+            -> relationships.staff -> included staff
+        We resolve two levels of nesting to extract service/staff info.
+        """
         records = raw.get("data")
         if not isinstance(records, list):
             return raw  # pass through errors as-is
 
-        # Build lookup for included resources
-        inc_map: dict[tuple[str, Any], dict[str, Any]] = {}
+        # Build lookup for included resources (key by (type, str(id)))
+        inc_map: dict[tuple[str, str], dict[str, Any]] = {}
         for item in raw.get("included") or []:
-            inc_map[(item.get("type"), item.get("id"))] = item
+            inc_map[(item.get("type", ""), str(item.get("id", "")))] = item
 
+        status_map = {0: "ожидает", 1: "подтверждён", 2: "пришёл", -1: "не пришёл"}
         result = []
+
         for r in records:
             attrs = r.get("attributes", {})
             dt_str = attrs.get("datetime", "")
@@ -639,33 +648,64 @@ class BookingClient:
             if date_to and date_part > date_to:
                 continue
 
-            # Extract related service/staff names
-            rels = r.get("relationships", {})
-            services = []
-            for s in rels.get("services", {}).get("data") or []:
-                svc = inc_map.get((s.get("type"), s.get("id")))
-                if svc:
-                    services.append(svc.get("attributes", {}).get("title", ""))
-
+            # Resolve nested record -> service_items / staff
+            services: list[dict[str, Any]] = []
             staff_name = ""
-            staff_data = rels.get("staff", {}).get("data")
-            if staff_data:
-                items = staff_data if isinstance(staff_data, list) else [staff_data]
-                for st in items:
-                    stf = inc_map.get((st.get("type"), st.get("id")))
-                    if stf:
-                        staff_name = stf.get("attributes", {}).get("name", "")
+            staff_specialization = ""
 
-            status_map = {0: "ожидает", 1: "подтверждён", 2: "пришёл", -1: "не пришёл"}
+            rels = r.get("relationships", {})
+            for rec_ref in rels.get("records", {}).get("data") or []:
+                rec = inc_map.get((rec_ref.get("type", ""), str(rec_ref.get("id", ""))))
+                if not rec:
+                    continue
+                rec_rels = rec.get("relationships", {})
+
+                # Service items
+                for si_ref in rec_rels.get("attendance_service_items", {}).get("data") or []:
+                    si = inc_map.get((si_ref.get("type", ""), str(si_ref.get("id", ""))))
+                    if not si:
+                        continue
+                    si_a = si.get("attributes", {})
+                    svc: dict[str, Any] = {"title": si_a.get("title", "")}
+                    cost = si_a.get("cost")
+                    if cost is not None:
+                        svc["cost"] = cost
+                    discount = si_a.get("discount")
+                    if discount:
+                        svc["discount"] = discount
+                    price = si_a.get("price_min")
+                    if price is not None:
+                        svc["price"] = price
+                    services.append(svc)
+
+                # Staff
+                staff_ref = rec_rels.get("staff", {}).get("data")
+                if staff_ref and not staff_name:
+                    if isinstance(staff_ref, list):
+                        staff_ref = staff_ref[0] if staff_ref else None
+                    if staff_ref:
+                        stf = inc_map.get((staff_ref.get("type", ""), str(staff_ref.get("id", ""))))
+                        if stf:
+                            stf_a = stf.get("attributes", {})
+                            staff_name = stf_a.get("name", "")
+                            staff_specialization = stf_a.get("specialization", "")
+
             entry: dict[str, Any] = {
                 "id": r.get("id"),
                 "datetime": dt_str,
+                "create_date": attrs.get("create_date", ""),
                 "services": services,
                 "staff": staff_name,
+                "staff_specialization": staff_specialization,
                 "status": status_map.get(attrs.get("attendance_status"), str(attrs.get("attendance_status"))),
                 "duration_min": (attrs.get("duration") or 0) // 60,
+                "paid_amount": attrs.get("paid_amount"),
+                "is_prepaid": attrs.get("is_prepaid", False),
+                "activity_id": attrs.get("activity_id") or None,
+                "comment": attrs.get("comment") or None,
                 "is_deleted": attrs.get("is_deleted", False),
                 "can_cancel": attrs.get("is_delete_record_allowed", False),
+                "can_change": attrs.get("is_change_record_allowed", False),
             }
             result.append(entry)
 
