@@ -37,10 +37,13 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
         Available operations:
 
           search_companies
-            Find salons/gyms/studios by name across all of YCLIENTS.
+            Find salons/gyms/studios by name (client-side text match).
             Returns company list with id, title, address, phone, and booking_domain.
             params: query (str) — name or keyword to search
-            optional: city_id (int), group_id (int) — filter by chain/network, count (int, default 10)
+            optional: city_id (int) — filter by city (2=Moscow, 1=SPb),
+              group_id (int) — filter by chain/network,
+              business_type_id (int) — filter by type (10=fitness, 1=salon, 18=barbershop),
+              count (int, default 10)
 
           get_company_booking_info
             Get full details for a specific company including its booking_domain.
@@ -96,6 +99,7 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
                 query,
                 city_id=int(p["city_id"]) if p.get("city_id") else None,
                 group_id=int(p["group_id"]) if p.get("group_id") else None,
+                business_type_id=int(p["business_type_id"]) if p.get("business_type_id") else None,
                 count=int(p.get("count", 10)),
             )
 

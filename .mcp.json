@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "yclients-mcp": {
+      "type": "http",
+      "url": "https://ktsverkun-mcp-servers-5136.twc1.net/yclients/mcp"
+    }
+  }
+}

@@ -422,35 +422,106 @@ class BookingClient:
 
     # ── Company discovery ─────────────────────────────────────────────────
 
+    # Common business_type_ids for parallel scanning when no type specified
+    _COMMON_BUSINESS_TYPES = [10, 1, 18, 32, 2, 48, 3, 35]
+    # 10=fitness, 1=salon, 18=barbershop, 32=cosmetics, 2=medical,
+    # 48=studio, 3=sport, 35=spa
+
     async def search_companies(
         self,
         query: str,
         *,
         city_id: int | None = None,
         group_id: int | None = None,
+        business_type_id: int | None = None,
         count: int = 10,
     ) -> dict[str, Any]:
-        """Search YCLIENTS companies by name. Returns companies with booking domain info."""
-        params: dict[str, Any] = {"title": query, "count": count}
-        if city_id:
-            params["city_id"] = city_id
-        if group_id:
-            params["group_id"] = group_id
+        """Search YCLIENTS companies by name (client-side text filter).
 
-        result = await self._request(
-            "api.yclients.com", "GET", "/api/v1/companies/", params=params
-        )
-        # API may return a list directly or {"success": ..., "data": [...]}
-        companies = result if isinstance(result, list) else (result.get("data") or [])
-        # Enrich with booking domain derived from main_group_id
-        for company in companies:
-            group_id = company.get("main_group_id")
-            if group_id:
-                company["booking_domain"] = f"n{group_id}.yclients.com"
-                company["booking_url"] = f"https://n{group_id}.yclients.com/company/{company['id']}"
-        if isinstance(result, list):
-            return {"success": True, "data": companies}
-        return result
+        The YCLIENTS REST API ``GET /api/v1/companies/`` does NOT support
+        text search — any ``title``/``q`` parameter is silently ignored.
+        We work around this by fetching pages of companies (with optional
+        ``city_id`` / ``business_type_id`` / ``group_id`` filters) and
+        matching *query* against the ``title`` field locally.
+
+        When neither ``group_id`` nor ``business_type_id`` is given, we
+        scan several common business types in parallel for speed.
+        """
+        query_lower = query.lower()
+
+        if group_id or business_type_id:
+            # Specific filter — single paginated scan
+            return await self._search_companies_paginated(
+                query_lower, city_id=city_id, group_id=group_id,
+                business_type_id=business_type_id, count=count,
+            )
+
+        # No type filter — scan common business types in parallel (shallow)
+        tasks = [
+            self._search_companies_paginated(
+                query_lower, city_id=city_id, business_type_id=bt, count=count,
+                max_pages=3,
+            )
+            for bt in self._COMMON_BUSINESS_TYPES
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        seen_ids: set[int] = set()
+        matched: list[dict[str, Any]] = []
+        for r in results:
+            if isinstance(r, Exception):
+                continue
+            for company in r.get("data", []):
+                cid = company.get("id")
+                if cid and cid not in seen_ids:
+                    seen_ids.add(cid)
+                    matched.append(company)
+
+        return {"success": True, "count": len(matched), "data": matched[:count]}
+
+    async def _search_companies_paginated(
+        self,
+        query_lower: str,
+        *,
+        city_id: int | None = None,
+        group_id: int | None = None,
+        business_type_id: int | None = None,
+        count: int = 10,
+        max_pages: int = 20,
+    ) -> dict[str, Any]:
+        api_params: dict[str, Any] = {"count": 200}
+        if city_id:
+            api_params["city_id"] = city_id
+        if group_id:
+            api_params["group_id"] = group_id
+        if business_type_id:
+            api_params["business_type_id"] = business_type_id
+
+        matched: list[dict[str, Any]] = []
+
+        for page in range(1, max_pages + 1):
+            api_params["page"] = page
+            result = await self._request(
+                "api.yclients.com", "GET", "/api/v1/companies/", params=api_params
+            )
+            companies = result if isinstance(result, list) else (result.get("data") or [])
+            if not companies:
+                break
+
+            for company in companies:
+                title = (company.get("title") or "").lower()
+                public_title = (company.get("public_title") or "").lower()
+                if query_lower in title or query_lower in public_title:
+                    mgid = company.get("main_group_id")
+                    if mgid:
+                        company["booking_domain"] = f"n{mgid}.yclients.com"
+                        company["booking_url"] = f"https://n{mgid}.yclients.com/company/{company['id']}"
+                    matched.append(company)
+
+            if len(matched) >= count or len(companies) < 200:
+                break
+
+        return {"success": True, "count": len(matched), "data": matched[:count]}
 
     async def get_company_booking_info(self, company_id: int) -> dict[str, Any]:
         """Get company details including its booking domain."""
