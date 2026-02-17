@@ -14,8 +14,12 @@ Auth flow:
 
 After auth, you can:
   - get_user_attendances — list the user's bookings
-  - search_activities    — find group classes by date/trainer
-  - book_activity        — sign up for a group class (with optional abonement)
+
+Regular appointment booking flow:
+  - list_services → list_staff → list_dates → list_times → book_record
+
+Group activity booking flow:
+  - search_activities → book_activity
 """
 
 from __future__ import annotations
@@ -53,6 +57,8 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
         (e.g. "n864017.yclients.com"). Use search_companies or get_company_booking_info
         to discover it automatically.
 
+        --- SMS Auth ---
+
           send_sms_code
             Request SMS confirmation code.
             params: domain, company_id (int), phone (str, e.g. "79161234567")
@@ -69,11 +75,44 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
             Manually set a user token (if you already have one).
             params: domain, user_token (str)
 
+        --- User Bookings ---
+
           get_user_attendances
             List the authenticated user's bookings (compact format).
             params: domain, company_id (int)
             optional: chain_id (int) — use instead of company_id for chains,
               date_from (str, "YYYY-MM-DD"), date_to (str, "YYYY-MM-DD") — filter by date range
+
+        --- Regular Appointment Booking ---
+
+          list_services
+            List services available for booking.
+            params: domain, company_id (int)
+            optional: staff_id (int) — filter services by staff member
+
+          list_staff
+            List staff members available for booking.
+            params: domain, company_id (int)
+
+          list_dates
+            List dates available for booking.
+            params: domain, company_id (int)
+            optional: staff_id (int)
+
+          list_times
+            List available time slots for a staff member on a date.
+            params: domain, company_id (int), staff_id (int), date (str, "YYYY-MM-DD")
+
+          book_record
+            Create a regular appointment (barber, salon, massage, etc.).
+            params: domain, company_id (int), staff_id (int),
+                    service_ids (list[int]), datetime (str, ISO format),
+                    phone (str), fullname (str)
+            optional: email (str), comment (str),
+                      notify_by_sms (int, hours before, default 24),
+                      notify_by_email (int, hours before, default 24)
+
+        --- Group Activity Booking ---
 
           search_activities
             Find group classes on a specific date.
@@ -110,100 +149,162 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
                 return {"error": True, "message": "Required param: company_id"}
             return await booking_client.get_company_booking_info(int(company_id))
 
-        domain: str = p.get("domain", "")
-        if not domain:
-            return {"error": True, "message": "Required param: domain (e.g. 'n864017.yclients.com'). Use search_companies to find it."}
-
-        # ── send_sms_code ─────────────────────────────────────────────────
-        if operation == "send_sms_code":
-            company_id = p.get("company_id")
-            phone = p.get("phone", "")
-            if not company_id or not phone:
-                return {"error": True, "message": "Required params: company_id, phone"}
-            return await booking_client.send_sms_code(domain, int(company_id), phone)
-
-        # ── verify_sms_code ───────────────────────────────────────────────
-        elif operation == "verify_sms_code":
-            company_id = p.get("company_id")
-            phone = p.get("phone", "")
-            code = p.get("code", "")
-            if not company_id or not phone or not code:
-                return {"error": True, "message": "Required params: company_id, phone, code"}
-            result = await booking_client.verify_sms_code(domain, int(company_id), phone, code)
-            # Annotate whether token was saved
-            stored = booking_client.get_user_token(domain)
-            result["_user_token_stored"] = bool(stored)
-            return result
-
-        # ── get_auth_status ───────────────────────────────────────────────
-        elif operation == "get_auth_status":
-            token = booking_client.get_user_token(domain)
-            return {
-                "domain": domain,
-                "authenticated": bool(token),
-                "user_token": token or None,
-            }
-
-        # ── set_user_token ────────────────────────────────────────────────
-        elif operation == "set_user_token":
-            user_token = p.get("user_token", "")
-            if not user_token:
-                return {"error": True, "message": "Required param: user_token"}
-            booking_client.set_user_token(domain, user_token)
-            return {"success": True, "message": f"User token set for domain {domain}"}
-
-        # ── get_user_attendances ──────────────────────────────────────────
-        elif operation == "get_user_attendances":
-            company_id = p.get("company_id")
-            if not company_id:
-                return {"error": True, "message": "Required param: company_id"}
-            chain_id = p.get("chain_id")
-            return await booking_client.get_user_attendances(
-                domain, int(company_id),
-                chain_id=int(chain_id) if chain_id else None,
-                date_from=p.get("date_from"),
-                date_to=p.get("date_to"),
-            )
-
-        # ── search_activities ─────────────────────────────────────────────
-        elif operation == "search_activities":
-            company_id = p.get("company_id")
-            date = p.get("date", "")
-            if not company_id or not date:
-                return {"error": True, "message": "Required params: company_id, date (YYYY-MM-DD)"}
-            return await booking_client.search_activities(
-                domain, int(company_id), date,
-                staff_id=int(p["staff_id"]) if p.get("staff_id") else None,
-                service_id=int(p["service_id"]) if p.get("service_id") else None,
-            )
-
-        # ── book_activity ─────────────────────────────────────────────────
-        elif operation == "book_activity":
-            company_id = p.get("company_id")
-            activity_id = p.get("activity_id")
-            phone = p.get("phone", "")
-            fullname = p.get("fullname", "")
-            if not company_id or not activity_id or not phone or not fullname:
-                return {"error": True, "message": "Required params: company_id, activity_id, phone, fullname"}
-            return await booking_client.book_activity(
-                domain, int(company_id), int(activity_id),
-                phone=phone,
-                fullname=fullname,
-                email=p.get("email", ""),
-                comment=p.get("comment", ""),
-                abonement=bool(p.get("abonement", False)),
-                notify_by_sms=int(p.get("notify_by_sms", 24)),
-                notify_by_email=int(p.get("notify_by_email", 24)),
-                is_personal_data_processing_allowed=bool(
-                    p.get("is_personal_data_processing_allowed", True)
-                ),
-            )
+        # All remaining operations require domain
+        elif operation in (
+            "send_sms_code", "verify_sms_code", "get_auth_status", "set_user_token",
+            "get_user_attendances",
+            "list_services", "list_staff", "list_dates", "list_times", "book_record",
+            "search_activities", "book_activity",
+        ):
+            domain: str = p.get("domain", "")
+            if not domain:
+                return {"error": True, "message": "Required param: domain (e.g. 'n80343.yclients.com'). Use search_companies to find it."}
+            return await _dispatch_domain_op(booking_client, operation, domain, p)
 
         else:
             available = [
                 "search_companies", "get_company_booking_info",
-                "send_sms_code", "verify_sms_code", "get_auth_status",
-                "set_user_token", "get_user_attendances",
+                "send_sms_code", "verify_sms_code", "get_auth_status", "set_user_token",
+                "get_user_attendances",
+                "list_services", "list_staff", "list_dates", "list_times", "book_record",
                 "search_activities", "book_activity",
             ]
             return {"error": True, "message": f"Unknown operation '{operation}'. Available: {available}"}
+
+
+async def _dispatch_domain_op(
+    bc: BookingClient, op: str, domain: str, p: dict[str, Any]
+) -> dict[str, Any]:
+    """Route domain-scoped operations to BookingClient methods."""
+
+    # ── SMS Auth ─────────────────────────────────────────────────────
+    if op == "send_sms_code":
+        company_id = p.get("company_id")
+        phone = p.get("phone", "")
+        if not company_id or not phone:
+            return {"error": True, "message": "Required params: company_id, phone"}
+        return await bc.send_sms_code(domain, int(company_id), phone)
+
+    if op == "verify_sms_code":
+        company_id = p.get("company_id")
+        phone = p.get("phone", "")
+        code = p.get("code", "")
+        if not company_id or not phone or not code:
+            return {"error": True, "message": "Required params: company_id, phone, code"}
+        result = await bc.verify_sms_code(domain, int(company_id), phone, code)
+        result["_user_token_stored"] = bool(bc.get_user_token(domain))
+        return result
+
+    if op == "get_auth_status":
+        token = bc.get_user_token(domain)
+        return {"domain": domain, "authenticated": bool(token), "user_token": token or None}
+
+    if op == "set_user_token":
+        user_token = p.get("user_token", "")
+        if not user_token:
+            return {"error": True, "message": "Required param: user_token"}
+        bc.set_user_token(domain, user_token)
+        return {"success": True, "message": f"User token set for domain {domain}"}
+
+    # ── User Attendances ─────────────────────────────────────────────
+    if op == "get_user_attendances":
+        company_id = p.get("company_id")
+        if not company_id:
+            return {"error": True, "message": "Required param: company_id"}
+        chain_id = p.get("chain_id")
+        return await bc.get_user_attendances(
+            domain, int(company_id),
+            chain_id=int(chain_id) if chain_id else None,
+            date_from=p.get("date_from"),
+            date_to=p.get("date_to"),
+        )
+
+    # ── Regular Appointment Booking ──────────────────────────────────
+    if op == "list_services":
+        company_id = p.get("company_id")
+        if not company_id:
+            return {"error": True, "message": "Required param: company_id"}
+        return await bc.list_services(
+            domain, int(company_id),
+            staff_id=int(p["staff_id"]) if p.get("staff_id") else None,
+        )
+
+    if op == "list_staff":
+        company_id = p.get("company_id")
+        if not company_id:
+            return {"error": True, "message": "Required param: company_id"}
+        return await bc.list_staff(domain, int(company_id))
+
+    if op == "list_dates":
+        company_id = p.get("company_id")
+        if not company_id:
+            return {"error": True, "message": "Required param: company_id"}
+        return await bc.list_dates(
+            domain, int(company_id),
+            staff_id=int(p["staff_id"]) if p.get("staff_id") else None,
+        )
+
+    if op == "list_times":
+        company_id = p.get("company_id")
+        staff_id = p.get("staff_id")
+        date = p.get("date", "")
+        if not company_id or not staff_id or not date:
+            return {"error": True, "message": "Required params: company_id, staff_id, date (YYYY-MM-DD)"}
+        return await bc.list_times(domain, int(company_id), int(staff_id), date)
+
+    if op == "book_record":
+        company_id = p.get("company_id")
+        staff_id = p.get("staff_id")
+        service_ids = p.get("service_ids")
+        datetime_str = p.get("datetime", "")
+        phone = p.get("phone", "")
+        fullname = p.get("fullname", "")
+        if not all([company_id, staff_id, service_ids, datetime_str, phone, fullname]):
+            return {"error": True, "message": "Required params: company_id, staff_id, service_ids (list), datetime (ISO), phone, fullname"}
+        return await bc.book_record(
+            domain, int(company_id),
+            staff_id=int(staff_id),
+            service_ids=[int(s) for s in service_ids],
+            datetime_str=datetime_str,
+            phone=phone,
+            fullname=fullname,
+            email=p.get("email", ""),
+            comment=p.get("comment", ""),
+            notify_by_sms=int(p.get("notify_by_sms", 24)),
+            notify_by_email=int(p.get("notify_by_email", 24)),
+        )
+
+    # ── Group Activity Booking ───────────────────────────────────────
+    if op == "search_activities":
+        company_id = p.get("company_id")
+        date = p.get("date", "")
+        if not company_id or not date:
+            return {"error": True, "message": "Required params: company_id, date (YYYY-MM-DD)"}
+        return await bc.search_activities(
+            domain, int(company_id), date,
+            staff_id=int(p["staff_id"]) if p.get("staff_id") else None,
+            service_id=int(p["service_id"]) if p.get("service_id") else None,
+        )
+
+    if op == "book_activity":
+        company_id = p.get("company_id")
+        activity_id = p.get("activity_id")
+        phone = p.get("phone", "")
+        fullname = p.get("fullname", "")
+        if not company_id or not activity_id or not phone or not fullname:
+            return {"error": True, "message": "Required params: company_id, activity_id, phone, fullname"}
+        return await bc.book_activity(
+            domain, int(company_id), int(activity_id),
+            phone=phone,
+            fullname=fullname,
+            email=p.get("email", ""),
+            comment=p.get("comment", ""),
+            abonement=bool(p.get("abonement", False)),
+            notify_by_sms=int(p.get("notify_by_sms", 24)),
+            notify_by_email=int(p.get("notify_by_email", 24)),
+            is_personal_data_processing_allowed=bool(
+                p.get("is_personal_data_processing_allowed", True)
+            ),
+        )
+
+    return {"error": True, "message": f"Unhandled operation: {op}"}

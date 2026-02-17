@@ -767,6 +767,162 @@ class BookingClient:
             },
         )
 
+    # ── Regular appointment booking ──────────────────────────────────────
+
+    async def list_services(
+        self, domain: str, company_id: int, *, staff_id: int | None = None,
+    ) -> dict[str, Any]:
+        """List bookable services. Optionally filter by staff_id."""
+        params: dict[str, Any] = {}
+        if staff_id:
+            params["staff_id"] = staff_id
+        raw = await self._request(
+            domain, "GET", f"/api/v1/book_services/{company_id}", params=params or None,
+        )
+        # Flatten: API returns nested categories with services inside
+        if isinstance(raw, dict) and "services" in raw:
+            raw = raw["services"]
+        if not isinstance(raw, list):
+            return raw  # pass through errors
+        flat: list[dict[str, Any]] = []
+        for item in raw:
+            svcs = item.get("services") if isinstance(item, dict) else None
+            if isinstance(svcs, list):
+                # category with nested services
+                cat = item.get("title", "")
+                for s in svcs:
+                    s["category"] = cat
+                    flat.append(s)
+            else:
+                flat.append(item)
+        compact = []
+        for s in flat:
+            entry: dict[str, Any] = {
+                "id": s.get("id"),
+                "title": s.get("title", ""),
+            }
+            price = s.get("price_min")
+            if price is not None:
+                entry["price_min"] = price
+            price_max = s.get("price_max")
+            if price_max is not None and price_max != price:
+                entry["price_max"] = price_max
+            dur = s.get("seance_length")
+            if dur:
+                entry["duration_min"] = dur // 60
+            cat = s.get("category")
+            if cat:
+                entry["category"] = cat
+            compact.append(entry)
+        return {"success": True, "count": len(compact), "services": compact}
+
+    async def list_staff(
+        self, domain: str, company_id: int, *, service_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """List bookable staff. Optionally filter by service_ids."""
+        params: dict[str, Any] = {}
+        if service_ids:
+            for sid in service_ids:
+                params.setdefault("service_ids[]", [])
+            # curl-cffi doesn't handle list params well, build manually
+        raw = await self._request(
+            domain, "GET", f"/api/v1/book_staff/{company_id}", params=params or None,
+        )
+        staff_list = raw if isinstance(raw, list) else (raw.get("data") or [])
+        compact = []
+        for s in staff_list:
+            entry: dict[str, Any] = {
+                "id": s.get("id"),
+                "name": s.get("name", ""),
+            }
+            spec = s.get("specialization")
+            if spec:
+                entry["specialization"] = spec
+            rating = s.get("rating")
+            if rating:
+                entry["rating"] = rating
+            compact.append(entry)
+        return {"success": True, "count": len(compact), "staff": compact}
+
+    async def list_dates(
+        self, domain: str, company_id: int,
+        *, staff_id: int | None = None,
+    ) -> dict[str, Any]:
+        """List dates available for booking."""
+        params: dict[str, Any] = {}
+        if staff_id:
+            params["staff_id"] = staff_id
+        raw = await self._request(
+            domain, "GET", f"/api/v1/book_dates/{company_id}", params=params or None,
+        )
+        if isinstance(raw, dict):
+            return {
+                "success": True,
+                "working_dates": raw.get("working_dates", []),
+            }
+        return raw
+
+    async def list_times(
+        self, domain: str, company_id: int, staff_id: int, date: str,
+    ) -> dict[str, Any]:
+        """List available time slots for a given staff member on a date."""
+        raw = await self._request(
+            domain, "GET", f"/api/v1/book_times/{company_id}/{staff_id}/{date}",
+        )
+        slots = raw if isinstance(raw, list) else (raw.get("data") or [])
+        compact = []
+        for s in slots:
+            compact.append({
+                "time": s.get("time", ""),
+                "datetime": s.get("datetime", ""),
+                "duration_min": (s.get("seance_length") or 0) // 60,
+            })
+        return {"success": True, "count": len(compact), "slots": compact}
+
+    async def book_record(
+        self,
+        domain: str,
+        company_id: int,
+        *,
+        staff_id: int,
+        service_ids: list[int],
+        datetime_str: str,
+        phone: str,
+        fullname: str,
+        email: str = "",
+        comment: str = "",
+        notify_by_sms: int = 24,
+        notify_by_email: int = 24,
+    ) -> dict[str, Any]:
+        """Create a regular appointment (non-group-activity).
+
+        Parameters:
+            datetime_str: ISO datetime, e.g. "2026-02-28T14:30:00+03:00"
+            service_ids: list of service IDs to book
+        """
+        appointments = [{
+            "id": 1,
+            "services": [{"id": sid} for sid in service_ids],
+            "staff_id": staff_id,
+            "datetime": datetime_str,
+        }]
+        body: dict[str, Any] = {
+            "phone": phone,
+            "fullname": fullname,
+            "email": email,
+            "comment": comment,
+            "notify_by_sms": notify_by_sms,
+            "notify_by_email": notify_by_email,
+            "appointments": appointments,
+            "is_personal_data_processing_allowed": True,
+            "is_newsletter_allowed": False,
+            "is_yc_newsletter_allowed": False,
+            "is_yc_personal_data_processing_allowed": False,
+        }
+        return await self._request(
+            domain, "POST", f"/api/v1/book_record/{company_id}", json=body,
+        )
+
     async def close(self) -> None:
         for session in self._sessions.values():
             await session.close()
