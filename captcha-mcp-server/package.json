@@ -1,0 +1,36 @@
+{
+  "name": "mcp-captcha-solver",
+  "version": "3.1.0",
+  "description": "99%+ success rate captcha solving MCP. 25+ tools with cascading multi-service fallback (CapSolver, CapMonster, 2Captcha, Anti-Captcha).",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "captcha",
+    "captcha-solver",
+    "ai",
+    "automation",
+    "llm",
+    "agent",
+    "ocr",
+    "tesseract",
+    "2captcha",
+    "anticaptcha",
+    "reCAPTCHA",
+    "hCaptcha"
+  ],
+  "author": "aezi",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "tesseract.js": "^5.0.0",
+    "sharp": "^0.33.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
