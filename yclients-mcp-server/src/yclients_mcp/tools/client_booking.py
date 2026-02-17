@@ -105,6 +105,9 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
 
           book_record
             Create a regular appointment (barber, salon, massage, etc.).
+            NOTE: YCLIENTS enforces reCAPTCHA server-side for this endpoint.
+            If it returns error + requires_human_verification=true, the booking
+            must be completed via the YCLIENTS app or the company website.
             params: domain, company_id (int), staff_id (int),
                     service_ids (list[int]), datetime (str, ISO format),
                     phone (str), fullname (str)

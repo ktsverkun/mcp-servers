@@ -416,9 +416,17 @@ class BookingClient:
             return {"error": True, "message": f"Connection failed: {err}"}
 
         try:
-            return response.json()  # type: ignore[no-any-return]
+            data: dict[str, Any] = response.json()
         except (ValueError, TypeError):
-            return {"data": response.text[:2000]}
+            data = {"data": response.text[:2000]}
+
+        if response.status_code >= 400:
+            if isinstance(data, dict):
+                data["_status_code"] = response.status_code
+            else:
+                data = {"error": True, "_status_code": response.status_code}
+
+        return data
 
     # ── Company discovery ─────────────────────────────────────────────────
 
@@ -919,9 +927,27 @@ class BookingClient:
             "is_yc_newsletter_allowed": False,
             "is_yc_personal_data_processing_allowed": False,
         }
-        return await self._request(
+        result = await self._request(
             domain, "POST", f"/api/v1/book_record/{company_id}", json=body,
         )
+
+        # 412 = reCAPTCHA or user confirmation required by YCLIENTS
+        if result.get("_status_code") == 412:
+            security = (result.get("errors") or {}).get("X-App-Security-Level") or {}
+            user_confirm = security.get("user_confirm") or {}
+            user_confirm_url = user_confirm.get("url", "")
+            return {
+                "error": True,
+                "requires_human_verification": True,
+                "user_confirm_url": user_confirm_url or None,
+                "message": (
+                    "YCLIENTS требует верификацию (reCAPTCHA) для создания записи через API. "
+                    "Запишитесь через мобильное приложение YCLIENTS или сайт компании."
+                    + (f" Ссылка подтверждения: {user_confirm_url}" if user_confirm_url else "")
+                ),
+            }
+
+        return result
 
     async def close(self) -> None:
         for session in self._sessions.values():
