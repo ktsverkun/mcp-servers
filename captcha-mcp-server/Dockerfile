@@ -4,18 +4,17 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 
-RUN npm ci --omit=dev \
-    && npm install -g supergateway
+RUN npm ci --omit=dev
 
 COPY index.js eng.traineddata ./
 COPY tools/ tools/
 
-ENV PORT=8002
+ENV MCP_TRANSPORT=http
+ENV MCP_PORT=8002
 
 EXPOSE 8002
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD node -e "require('net').createConnection(8002,'localhost').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"
 
-# Wrap the stdio MCP server with supergateway to expose HTTP/SSE transport
-CMD ["supergateway", "--port", "8002", "--stdio", "node /app/index.js", "--outputTransport", "streamableHttp"]
+CMD ["node", "index.js"]

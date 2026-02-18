@@ -12,6 +12,7 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
@@ -50,18 +51,17 @@ import {
     solveAnyCaptcha
 } from './tools/high-reliability.js';
 
-// Create server instance
-const server = new Server(
-    {
-        name: "mcp-captcha-solver",
-        version: "3.0.0",
-    },
-    {
-        capabilities: {
-            tools: {},
-        },
-    }
-);
+// Factory to create a configured server instance
+function createServer() {
+    const srv = new Server(
+        { name: "mcp-captcha-solver", version: "3.0.0" },
+        { capabilities: { tools: {} } }
+    );
+    registerHandlers(srv);
+    return srv;
+}
+
+const server = createServer();
 
 // Tool definitions
 const TOOLS = [
@@ -488,13 +488,14 @@ const TOOLS = [
     }
 ];
 
-// List tools handler
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+// Register all handlers on a server instance
+function registerHandlers(srv) {
+
+srv.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: TOOLS };
 });
 
-// Tool execution handler
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+srv.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
     try {
@@ -639,6 +640,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
     }
 });
+
+} // end registerHandlers
 
 /**
  * Get all supported captcha types
@@ -846,9 +849,58 @@ function getCaptchaSolvingStrategy(captchaType) {
 
 // Start server
 async function runServer() {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error("MCP Captcha Solver v3.0 running - 22 tools, 15 captcha types");
+    const mode = process.env.MCP_TRANSPORT || 'stdio';
+
+    if (mode === 'http') {
+        const express = (await import('express')).default;
+        const app = express();
+        const port = parseInt(process.env.MCP_PORT || '8002');
+
+        // Store transports by session ID for reuse
+        const sessions = new Map();
+
+        app.post('/mcp', express.json(), async (req, res) => {
+            const sessionId = req.headers['mcp-session-id'];
+            let transport;
+
+            if (sessionId && sessions.has(sessionId)) {
+                transport = sessions.get(sessionId);
+            } else {
+                transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => crypto.randomUUID() });
+                const newServer = createServer();
+                await newServer.connect(transport);
+                sessions.set(transport.sessionId, transport);
+            }
+
+            await transport.handleRequest(req, res, req.body);
+        });
+
+        app.get('/mcp', async (req, res) => {
+            const sessionId = req.headers['mcp-session-id'];
+            if (!sessionId || !sessions.has(sessionId)) {
+                res.status(400).json({ error: 'Missing or invalid session ID' });
+                return;
+            }
+            const transport = sessions.get(sessionId);
+            await transport.handleRequest(req, res);
+        });
+
+        app.delete('/mcp', async (req, res) => {
+            const sessionId = req.headers['mcp-session-id'];
+            if (sessionId && sessions.has(sessionId)) {
+                sessions.delete(sessionId);
+            }
+            res.status(200).end();
+        });
+
+        app.listen(port, '0.0.0.0', () => {
+            console.error(`MCP Captcha Solver v3.0 HTTP running on port ${port} - 22 tools, 15 captcha types`);
+        });
+    } else {
+        const transport = new StdioServerTransport();
+        await server.connect(transport);
+        console.error("MCP Captcha Solver v3.0 running - 22 tools, 15 captcha types");
+    }
 }
 
 runServer().catch((error) => {
