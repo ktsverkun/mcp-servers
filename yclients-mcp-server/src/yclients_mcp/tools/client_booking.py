@@ -105,13 +105,15 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
 
           book_record
             Create a regular appointment (barber, salon, massage, etc.).
-            NOTE: YCLIENTS enforces reCAPTCHA server-side for this endpoint.
-            If it returns error + requires_human_verification=true, the booking
-            must be completed via the YCLIENTS app or the company website.
+            NOTE: YCLIENTS enforces reCAPTCHA v3 server-side. On first call
+            (without captcha_token), it returns requires_captcha=true with
+            recaptcha_v3_key. Use the key to solve reCAPTCHA v3, then retry
+            with the captcha_token parameter.
             params: domain, company_id (int), staff_id (int),
                     service_ids (list[int]), datetime (str, ISO format),
                     phone (str), fullname (str)
             optional: email (str), comment (str),
+                      captcha_token (str) — solved reCAPTCHA v3 token,
                       notify_by_sms (int, hours before, default 24),
                       notify_by_email (int, hours before, default 24)
 
@@ -275,6 +277,7 @@ async def _dispatch_domain_op(
             comment=p.get("comment", ""),
             notify_by_sms=int(p.get("notify_by_sms", 24)),
             notify_by_email=int(p.get("notify_by_email", 24)),
+            captcha_token=p.get("captcha_token", ""),
         )
 
     # ── Group Activity Booking ───────────────────────────────────────

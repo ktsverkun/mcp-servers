@@ -426,6 +426,15 @@ class BookingClient:
             else:
                 data = {"error": True, "_status_code": response.status_code}
 
+        # Capture X-App-Security-Level header (contains recaptcha_v3 key on 412)
+        security_header = response.headers.get("X-App-Security-Level")
+        if security_header and isinstance(data, dict):
+            try:
+                import json as _json
+                data["_security_level"] = _json.loads(security_header)
+            except (ValueError, TypeError):
+                pass
+
         return data
 
     # ── Company discovery ─────────────────────────────────────────────────
@@ -901,12 +910,14 @@ class BookingClient:
         comment: str = "",
         notify_by_sms: int = 24,
         notify_by_email: int = 24,
+        captcha_token: str = "",
     ) -> dict[str, Any]:
         """Create a regular appointment (non-group-activity).
 
         Parameters:
             datetime_str: ISO datetime, e.g. "2026-02-28T14:30:00+03:00"
             service_ids: list of service IDs to book
+            captcha_token: reCAPTCHA v3 token (if available) to pass in X-App-Validation-Token
         """
         appointments = [{
             "id": 1,
@@ -927,23 +938,36 @@ class BookingClient:
             "is_yc_newsletter_allowed": False,
             "is_yc_personal_data_processing_allowed": False,
         }
+        extra_headers: dict[str, str] | None = None
+        if captcha_token:
+            extra_headers = {"X-App-Validation-Token": captcha_token}
+
         result = await self._request(
             domain, "POST", f"/api/v1/book_record/{company_id}", json=body,
+            extra_headers=extra_headers,
         )
 
         # 412 = reCAPTCHA or user confirmation required by YCLIENTS
         if result.get("_status_code") == 412:
-            security = (result.get("errors") or {}).get("X-App-Security-Level") or {}
+            # Try to get security info from response header (preferred)
+            security = result.get("_security_level") or {}
+            # Fallback to JSON body errors
+            if not security:
+                security = (result.get("errors") or {}).get("X-App-Security-Level") or {}
+
+            recaptcha_v3 = security.get("recaptcha_v3") or {}
+            recaptcha_key = recaptcha_v3.get("key", "")
             user_confirm = security.get("user_confirm") or {}
             user_confirm_url = user_confirm.get("url", "")
             return {
                 "error": True,
-                "requires_human_verification": True,
+                "requires_captcha": True,
+                "recaptcha_v3_key": recaptcha_key or None,
                 "user_confirm_url": user_confirm_url or None,
                 "message": (
-                    "YCLIENTS требует верификацию (reCAPTCHA) для создания записи через API. "
-                    "Запишитесь через мобильное приложение YCLIENTS или сайт компании."
-                    + (f" Ссылка подтверждения: {user_confirm_url}" if user_confirm_url else "")
+                    "YCLIENTS requires reCAPTCHA v3 verification for booking."
+                    + (f" reCAPTCHA site key: {recaptcha_key}" if recaptcha_key else "")
+                    + (f" Fallback confirm URL: {user_confirm_url}" if user_confirm_url else "")
                 ),
             }
 
