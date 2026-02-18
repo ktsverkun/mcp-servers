@@ -869,10 +869,14 @@ async function runServer() {
                 transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => crypto.randomUUID() });
                 const newServer = createServer();
                 await newServer.connect(transport);
-                sessions.set(transport.sessionId, transport);
             }
 
             await transport.handleRequest(req, res, req.body);
+
+            // Store session after handleRequest so transport.sessionId is set
+            if (!sessionId && transport.sessionId) {
+                sessions.set(transport.sessionId, transport);
+            }
         });
 
         app.get('/mcp', async (req, res) => {
