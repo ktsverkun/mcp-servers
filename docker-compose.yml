@@ -50,21 +50,20 @@ services:
       retries: 3
       start_period: 30s
 
-  # captcha-mcp temporarily disabled — causes 100% CPU on Timeweb
-  # captcha-mcp:
-  #   build:
-  #     context: ./captcha-mcp-server
-  #   environment:
-  #     - CAPSOLVER_API_KEY=${CAPSOLVER_API_KEY:-}
-  #     - CAPMONSTER_API_KEY=${CAPMONSTER_API_KEY:-}
-  #     - TWOCAPTCHA_API_KEY=${TWOCAPTCHA_API_KEY:-}
-  #     - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY:-}
-  #   expose:
-  #     - "8002"
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "node", "-e", "require('net').createConnection(8002,'localhost').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
-  #     interval: 30s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 60s
+  captcha-mcp:
+    build:
+      context: ./captcha-mcp-server
+    environment:
+      - CAPSOLVER_API_KEY=${CAPSOLVER_API_KEY:-}
+      - CAPMONSTER_API_KEY=${CAPMONSTER_API_KEY:-}
+      - TWOCAPTCHA_API_KEY=${TWOCAPTCHA_API_KEY:-}
+      - ANTICAPTCHA_API_KEY=${ANTICAPTCHA_API_KEY:-}
+    expose:
+      - "8002"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').createConnection(8002,'localhost').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
