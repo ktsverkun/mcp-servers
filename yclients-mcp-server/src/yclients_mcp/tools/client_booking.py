@@ -119,7 +119,17 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
           user_confirm_start_check
             Send SMS to user's phone for booking confirmation.
             Call this after book_record returns user_confirm_token.
+            If response has check_captcha='google_recaptcha_v2', solve it and
+            call user_confirm_check_captcha first.
             params: token (str) — the user_confirm_token from book_record response
+
+          user_confirm_check_captcha
+            Submit solved reCAPTCHA v2 token for booking confirmation.
+            Call when user_confirm_start_check returns check_captcha='google_recaptcha_v2'.
+            Site key: 6LcxSnIcAAAAAJhM5duOSvzttkI2_-wmLhut8nbL
+            Page URL: https://yclients.com/user/confirm/<token>/
+            params: token (str) — the user_confirm_token,
+                    captcha_token (str) — solved reCAPTCHA v2 token
 
           user_confirm_check_code
             Verify SMS code to confirm the pending booking.
@@ -170,6 +180,14 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
                 return {"error": True, "message": "Required param: token (user_confirm_token from book_record response)"}
             return await booking_client.user_confirm_start_check(token)
 
+        # ── user_confirm_check_captcha ────────────────────────────────────
+        elif operation == "user_confirm_check_captcha":
+            token = p.get("token", "")
+            captcha_token = p.get("captcha_token", "")
+            if not token or not captcha_token:
+                return {"error": True, "message": "Required params: token, captcha_token"}
+            return await booking_client.user_confirm_check_captcha(token, captcha_token)
+
         # ── user_confirm_check_code ───────────────────────────────────────
         elif operation == "user_confirm_check_code":
             token = p.get("token", "")
@@ -193,7 +211,7 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
         else:
             available = [
                 "search_companies", "get_company_booking_info",
-                "user_confirm_start_check", "user_confirm_check_code",
+                "user_confirm_start_check", "user_confirm_check_captcha", "user_confirm_check_code",
                 "send_sms_code", "verify_sms_code", "get_auth_status", "set_user_token",
                 "get_user_attendances",
                 "list_services", "list_staff", "list_dates", "list_times", "book_record",

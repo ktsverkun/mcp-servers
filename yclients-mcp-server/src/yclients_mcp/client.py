@@ -1012,6 +1012,43 @@ class BookingClient:
                 data = {"error": True, "_status_code": resp.status_code}
         return data
 
+    async def user_confirm_check_captcha(self, token: str, captcha_token: str) -> dict[str, Any]:
+        """Submit reCAPTCHA v2 token for booking confirmation (api.yclients.com).
+
+        Call after user_confirm_start_check returns check_captcha='google_recaptcha_v2'.
+        Response indicates whether check_code (SMS) is also needed.
+        """
+        pt = self.partner_token or next(iter(self._partner_tokens.values()), "")
+        headers: dict[str, str] = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": "https://yclients.com",
+            "Referer": f"https://yclients.com/user/confirm/{token}/",
+        }
+        if pt:
+            headers["Authorization"] = f"Bearer {pt}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.post(
+                    f"https://api.yclients.com/api/v1/user/confirm/token/{token}/check_captcha",
+                    headers=headers,
+                    json={"captcha_token": captcha_token},
+                )
+            except httpx.TimeoutException:
+                return {"error": True, "message": "Request timed out"}
+            except httpx.ConnectError as exc:
+                return {"error": True, "message": f"Connection failed: {exc}"}
+        try:
+            data3: dict[str, Any] = resp.json()
+        except (ValueError, TypeError):
+            data3 = {"data": resp.text[:2000]}
+        if resp.status_code >= 400:
+            if isinstance(data3, dict):
+                data3["_status_code"] = resp.status_code
+            else:
+                data3 = {"error": True, "_status_code": resp.status_code}
+        return data3
+
     async def user_confirm_check_code(self, token: str, code: str) -> dict[str, Any]:
         """Verify SMS code to confirm a pending booking (api.yclients.com)."""
         pt = self.partner_token or next(iter(self._partner_tokens.values()), "")
