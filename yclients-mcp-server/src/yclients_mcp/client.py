@@ -959,19 +959,91 @@ class BookingClient:
             recaptcha_key = recaptcha_v3.get("key", "")
             user_confirm = security.get("user_confirm") or {}
             user_confirm_url = user_confirm.get("url", "")
+            user_confirm_token = user_confirm.get("token", "")
+            # Also extract token from URL if not directly available
+            if not user_confirm_token and user_confirm_url:
+                m = re.search(r"/user/confirm/([a-f0-9]{40,})", user_confirm_url)
+                if m:
+                    user_confirm_token = m.group(1)
             return {
                 "error": True,
                 "requires_captcha": True,
                 "recaptcha_v3_key": recaptcha_key or None,
                 "user_confirm_url": user_confirm_url or None,
+                "user_confirm_token": user_confirm_token or None,
                 "message": (
-                    "YCLIENTS requires reCAPTCHA v3 verification for booking."
+                    "YCLIENTS requires phone verification for booking."
+                    + (f" Call user_confirm_start_check with token: {user_confirm_token}" if user_confirm_token else "")
                     + (f" reCAPTCHA site key: {recaptcha_key}" if recaptcha_key else "")
-                    + (f" Fallback confirm URL: {user_confirm_url}" if user_confirm_url else "")
                 ),
             }
 
         return result
+
+    async def user_confirm_start_check(self, token: str) -> dict[str, Any]:
+        """Send SMS to user's phone for booking confirmation (api.yclients.com)."""
+        pt = self.partner_token or next(iter(self._partner_tokens.values()), "")
+        headers: dict[str, str] = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": "https://yclients.com",
+            "Referer": f"https://yclients.com/user/confirm/{token}/",
+        }
+        if pt:
+            headers["Authorization"] = f"Bearer {pt}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.post(
+                    f"https://api.yclients.com/api/v1/user/confirm/token/{token}/start_check",
+                    headers=headers,
+                )
+            except httpx.TimeoutException:
+                return {"error": True, "message": "Request timed out"}
+            except httpx.ConnectError as exc:
+                return {"error": True, "message": f"Connection failed: {exc}"}
+        try:
+            data: dict[str, Any] = resp.json()
+        except (ValueError, TypeError):
+            data = {"data": resp.text[:2000]}
+        if resp.status_code >= 400:
+            if isinstance(data, dict):
+                data["_status_code"] = resp.status_code
+            else:
+                data = {"error": True, "_status_code": resp.status_code}
+        return data
+
+    async def user_confirm_check_code(self, token: str, code: str) -> dict[str, Any]:
+        """Verify SMS code to confirm a pending booking (api.yclients.com)."""
+        pt = self.partner_token or next(iter(self._partner_tokens.values()), "")
+        headers: dict[str, str] = {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": "https://yclients.com",
+            "Referer": f"https://yclients.com/user/confirm/{token}/",
+        }
+        if pt:
+            headers["Authorization"] = f"Bearer {pt}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            try:
+                resp = await client.post(
+                    f"https://api.yclients.com/api/v1/user/confirm/token/{token}/check_code",
+                    headers=headers,
+                    json={"code": code},
+                )
+            except httpx.TimeoutException:
+                return {"error": True, "message": "Request timed out"}
+            except httpx.ConnectError as exc:
+                return {"error": True, "message": f"Connection failed: {exc}"}
+        try:
+            data2: dict[str, Any] = resp.json()
+        except (ValueError, TypeError):
+            data2 = {"data": resp.text[:2000]}
+        if resp.status_code >= 400:
+            if isinstance(data2, dict):
+                data2["_status_code"] = resp.status_code
+            else:
+                data2 = {"error": True, "_status_code": resp.status_code}
+        return data2
 
     async def close(self) -> None:
         for session in self._sessions.values():

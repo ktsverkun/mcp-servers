@@ -105,10 +105,9 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
 
           book_record
             Create a regular appointment (barber, salon, massage, etc.).
-            NOTE: YCLIENTS enforces reCAPTCHA v3 server-side. On first call
-            (without captcha_token), it returns requires_captcha=true with
-            recaptcha_v3_key. Use the key to solve reCAPTCHA v3, then retry
-            with the captcha_token parameter.
+            On first call, YCLIENTS returns requires_captcha=true with
+            user_confirm_token. Then: call user_confirm_start_check to send
+            SMS, get the code from user, call user_confirm_check_code to confirm.
             params: domain, company_id (int), staff_id (int),
                     service_ids (list[int]), datetime (str, ISO format),
                     phone (str), fullname (str)
@@ -116,6 +115,16 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
                       captcha_token (str) — solved reCAPTCHA v3 token,
                       notify_by_sms (int, hours before, default 24),
                       notify_by_email (int, hours before, default 24)
+
+          user_confirm_start_check
+            Send SMS to user's phone for booking confirmation.
+            Call this after book_record returns user_confirm_token.
+            params: token (str) — the user_confirm_token from book_record response
+
+          user_confirm_check_code
+            Verify SMS code to confirm the pending booking.
+            params: token (str) — the user_confirm_token from book_record response,
+                    code (str) — the SMS code received by the user
 
         --- Group Activity Booking ---
 
@@ -154,6 +163,21 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
                 return {"error": True, "message": "Required param: company_id"}
             return await booking_client.get_company_booking_info(int(company_id))
 
+        # ── user_confirm_start_check ──────────────────────────────────────
+        elif operation == "user_confirm_start_check":
+            token = p.get("token", "")
+            if not token:
+                return {"error": True, "message": "Required param: token (user_confirm_token from book_record response)"}
+            return await booking_client.user_confirm_start_check(token)
+
+        # ── user_confirm_check_code ───────────────────────────────────────
+        elif operation == "user_confirm_check_code":
+            token = p.get("token", "")
+            code = p.get("code", "")
+            if not token or not code:
+                return {"error": True, "message": "Required params: token, code"}
+            return await booking_client.user_confirm_check_code(token, code)
+
         # All remaining operations require domain
         elif operation in (
             "send_sms_code", "verify_sms_code", "get_auth_status", "set_user_token",
@@ -169,6 +193,7 @@ def register(mcp: FastMCP, booking_client: BookingClient) -> None:
         else:
             available = [
                 "search_companies", "get_company_booking_info",
+                "user_confirm_start_check", "user_confirm_check_code",
                 "send_sms_code", "verify_sms_code", "get_auth_status", "set_user_token",
                 "get_user_attendances",
                 "list_services", "list_staff", "list_dates", "list_times", "book_record",
